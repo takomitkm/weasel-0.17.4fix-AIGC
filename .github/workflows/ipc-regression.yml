@@ -1,0 +1,81 @@
+name: IPC regression tests (temporary CI probe)
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  ipc-tests:
+    runs-on: windows-2022
+    env:
+      boost_version: 1.84.0
+      BOOST_ROOT: ${{ github.workspace }}\deps\boost_1_84_0
+      SDKVER: 10.0.19041.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Configure build environment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item env.vs2022.bat env.bat
+          $env:VERSION_MAJOR = '0'
+          $env:VERSION_MINOR = '17'
+          $env:VERSION_PATCH = '4'
+          $env:PRODUCT_VERSION = '0.17.4.999'
+          $env:FILE_VERSION = '0.17.4.999'
+          cscript.exe //nologo render.js weasel.props BOOST_ROOT PLATFORM_TOOLSET VERSION_MAJOR VERSION_MINOR VERSION_PATCH PRODUCT_VERSION FILE_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "render.js failed with exit code $LASTEXITCODE" }
+
+      - name: Cache Boost
+        id: cache-boost
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BOOST_ROOT }}
+          key: ${{ runner.os }}-boost-${{ env.boost_version }}-ipc-probe
+
+      - name: Install and build Boost
+        if: steps.cache-boost.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\install_boost.bat
+          if ($LASTEXITCODE -ne 0) { throw "install_boost.bat failed with exit code $LASTEXITCODE" }
+          .\build.bat boost arm64
+          if ($LASTEXITCODE -ne 0) { throw "build.bat boost arm64 failed with exit code $LASTEXITCODE" }
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          sdk: ${{ env.SDKVER }}
+
+      - name: Build IPC regression tests (Debug x64)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          msbuild.exe weasel.sln /t:TestResponseParser:Build /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=${{ env.SDKVER }} /fl7
+          if ($LASTEXITCODE -ne 0) { throw "TestResponseParser build failed with exit code $LASTEXITCODE" }
+
+      - name: Run IPC regression tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem -Path . -Recurse -Filter TestResponseParser.exe |
+            Where-Object { $_.FullName -like '*\msbuild\Debug\x64\*' } |
+            Select-Object -First 1
+          if (-not $exe) { throw 'TestResponseParser.exe not found under msbuild\Debug\x64' }
+          Write-Host "Running $($exe.FullName)"
+          $cmdLine = 'echo. | "{0}"' -f $exe.FullName
+          & cmd.exe /c $cmdLine
+          if ($LASTEXITCODE -ne 0) { throw "IPC regression tests failed with exit code $LASTEXITCODE" }
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipc-regression-msbuild-log
+          path: msbuild*.log
+          if-no-files-found: ignore
