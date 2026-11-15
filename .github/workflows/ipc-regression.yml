@@ -23,6 +23,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Copy-Item env.vs2022.bat env.bat
+          $env:PLATFORM_TOOLSET = 'v143'
           $env:VERSION_MAJOR = '0'
           $env:VERSION_MINOR = '17'
           $env:VERSION_PATCH = '4'
