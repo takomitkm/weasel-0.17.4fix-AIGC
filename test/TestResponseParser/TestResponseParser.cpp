@@ -4,6 +4,7 @@
 #include "stdafx.h"
 #include <boost/detail/lightweight_test.hpp>
 #include <ResponseParser.h>
+#include <WeaselIPC.h>
 #include <string>
 
 // P2 regression tests: malformed IPC payloads must not throw across the
@@ -208,6 +209,75 @@ void test_9() {
   BOOST_TEST(!result);
 }
 
+// ---- Protocol version handshake (fix/ipc-version-handshake) ----
+
+// The server's protocol.version line is tracked even when no other
+// deserializer is active.
+void test_10() {
+  std::wstring commit;
+  weasel::Context ctx;
+  weasel::Status status;
+  weasel::ResponseParser parser(&commit, &ctx, &status);
+  parser.Feed(L"protocol.version=1");
+  BOOST_TEST_EQ(weasel::WEASEL_IPC_PROTOCOL_VERSION,
+                parser.server_protocol_version);
+}
+
+// Whatever the compiled-in constant is, the parser reports verbatim what the
+// server sent; the comparison against the client constant happens elsewhere.
+void test_11() {
+  std::wstring commit;
+  weasel::Context ctx;
+  weasel::Status status;
+  weasel::ResponseParser parser(&commit, &ctx, &status);
+  parser.Feed(L"protocol.version=42");
+  BOOST_TEST_EQ(42, parser.server_protocol_version);
+}
+
+// An old server without the handshake leaves the field at -1.
+void test_12() {
+  std::wstring commit;
+  weasel::Context ctx;
+  weasel::Status status;
+  weasel::ResponseParser parser(&commit, &ctx, &status);
+  parser.Feed(L"action=noop");
+  BOOST_TEST_EQ(-1, parser.server_protocol_version);
+}
+
+// A malformed version value is treated as absent instead of guessing.
+void test_13() {
+  std::wstring commit;
+  weasel::Context ctx;
+  weasel::Status status;
+  weasel::ResponseParser parser(&commit, &ctx, &status);
+  parser.Feed(L"protocol.version=not-a-number");
+  BOOST_TEST_EQ(-1, parser.server_protocol_version);
+
+  weasel::ResponseParser parser2(&commit, &ctx, &status);
+  parser2.Feed(L"protocol.version=1garbage");
+  BOOST_TEST_EQ(-1, parser2.server_protocol_version);
+}
+
+// The handshake line flows through the full operator() path and does not
+// disturb parsing of the action lines that follow it.
+void test_14() {
+  WCHAR resp[] =
+      L"protocol.version=1\n"
+      L"action=commit\n"
+      L"commit=\x4f60\x597d\n"
+      L".\n";
+  DWORD len = wcslen(resp);
+  std::wstring commit;
+  weasel::Context ctx;
+  weasel::Status status;
+  weasel::ResponseParser parser(&commit, &ctx, &status);
+  const bool ok = parser(resp, len);
+  BOOST_TEST(ok);
+  BOOST_TEST_EQ(weasel::WEASEL_IPC_PROTOCOL_VERSION,
+                parser.server_protocol_version);
+  BOOST_TEST(commit == L"\x4f60\x597d");
+}
+
 int _tmain(int argc, _TCHAR* argv[]) {
   test_1();
   test_2();
@@ -218,6 +288,11 @@ int _tmain(int argc, _TCHAR* argv[]) {
   test_7();
   test_8();
   test_9();
+  test_10();
+  test_11();
+  test_12();
+  test_13();
+  test_14();
 
   system("pause");
   return boost::report_errors();
