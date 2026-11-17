@@ -219,8 +219,7 @@ void test_10() {
   weasel::Status status;
   weasel::ResponseParser parser(&commit, &ctx, &status);
   parser.Feed(L"protocol.version=1");
-  BOOST_TEST_EQ(weasel::WEASEL_IPC_PROTOCOL_VERSION,
-                parser.server_protocol_version);
+  BOOST_TEST_EQ(WEASEL_IPC_PROTOCOL_VERSION, parser.server_protocol_version);
 }
 
 // Whatever the compiled-in constant is, the parser reports verbatim what the
@@ -273,8 +272,7 @@ void test_14() {
   weasel::ResponseParser parser(&commit, &ctx, &status);
   const bool ok = parser(resp, len);
   BOOST_TEST(ok);
-  BOOST_TEST_EQ(weasel::WEASEL_IPC_PROTOCOL_VERSION,
-                parser.server_protocol_version);
+  BOOST_TEST_EQ(WEASEL_IPC_PROTOCOL_VERSION, parser.server_protocol_version);
   BOOST_TEST(commit == L"\x4f60\x597d");
 }
 
