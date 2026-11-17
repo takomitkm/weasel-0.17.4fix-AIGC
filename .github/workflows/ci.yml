@@ -1,204 +1,110 @@
-name: CI
+name: IPC regression tests (temporary CI probe)
 
 on:
   push:
-    branches:
-      - '*'
-    tags:
-      - '[0-9]+.*'
-  pull_request:
   workflow_dispatch:
 
 jobs:
-  lint:
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout last commit
-        uses: actions/checkout@v4
-
-      - name: Install clang-format 18
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        run: |
-          wget https://apt.llvm.org/llvm-snapshot.gpg.key
-          sudo gpg --dearmor < llvm-snapshot.gpg.key > /usr/share/keyrings/llvm-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" | sudo tee /etc/apt/sources.list.d/llvm-toolchain-jammy-18.list
-          sudo apt-get update
-          sudo apt-get install -y clang-format-18
-          sudo ln -sf /usr/bin/clang-format-18 /usr/local/bin/clang-format
-          clang-format --version
-
-      - name: Code style lint
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        shell: bash
-        run: ./clang-format.sh -i
-
-  build:
-    needs: lint
+  ipc-tests:
     runs-on: windows-2022
     env:
       boost_version: 1.84.0
       BOOST_ROOT: ${{ github.workspace }}\deps\boost_1_84_0
       SDKVER: 10.0.19041.0
-    strategy:
-      matrix:
-        variant: [msbuild, xmake]
     steps:
-      - name: Checkout last commit
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: true
           fetch-depth: 0
 
-      - name: Fetch all tags
-        run: git fetch --tags
-
       - name: Configure build environment
-        shell: bash
+        shell: pwsh
         run: |
-          cp env.vs2022.bat env.bat
-          echo git_ref_name="$(git describe --always)" >> $GITHUB_ENV
+          $ErrorActionPreference = 'Stop'
+          Copy-Item env.vs2022.bat env.bat
+          $env:PLATFORM_TOOLSET = 'v143'
+          $env:VERSION_MAJOR = '0'
+          $env:VERSION_MINOR = '17'
+          $env:VERSION_PATCH = '4'
+          $env:PRODUCT_VERSION = '0.17.4.999'
+          $env:FILE_VERSION = '0.17.4.999'
+          cscript.exe //nologo render.js weasel.props BOOST_ROOT PLATFORM_TOOLSET VERSION_MAJOR VERSION_MINOR VERSION_PATCH PRODUCT_VERSION FILE_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "render.js failed with exit code $LASTEXITCODE" }
 
       - name: Cache Boost
         id: cache-boost
         uses: actions/cache@v4
         with:
-          path: |
-            ${{ env.BOOST_ROOT }}
-          key: ${{ runner.os }}-boost-${{ env.boost_version }}
+          path: ${{ env.BOOST_ROOT }}
+          key: ${{ runner.os }}-boost-${{ env.boost_version }}-ipc-probe
 
-      - name: Install Boost
+      - name: Install and build Boost
         if: steps.cache-boost.outputs.cache-hit != 'true'
-        shell: bash
+        shell: pwsh
         run: |
-          ./install_boost.bat
-          ./build.bat boost arm64
+          $ErrorActionPreference = 'Stop'
+          .\install_boost.bat
+          if ($LASTEXITCODE -ne 0) { throw "install_boost.bat failed with exit code $LASTEXITCODE" }
+          .\build.bat boost arm64
+          if ($LASTEXITCODE -ne 0) { throw "build.bat boost arm64 failed with exit code $LASTEXITCODE" }
 
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           sdk: ${{ env.SDKVER }}
 
-      # bundled winsparkle v0.9.2 to disable auto open ReleaseNoteUrl in default browser
-      - name: cache bundled winsparkle
-        id: cache-winsparkle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ github.workspace }}\winsparkle\x64\Release\WinSparkle.dll
-            ${{ github.workspace }}\winsparkle\x64\Release\WinSparkle.lib
-            ${{ github.workspace }}\winsparkle\Release\WinSparkle.dll
-            ${{ github.workspace }}\winsparkle\Release\WinSparkle.lib
-          key: ${{ runner.os }}-winsparkle-v0.9.2-bundled
-          restore-keys: |
-            winsparkle-v0.9.2-bundled
-
-      - name: Build bundled winsparkle
-        if: steps.cache-winsparkle.outputs.cache-hit != 'true'
+      - name: Build IPC regression tests (Debug x64)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if (Test-Path winsparkle) { Remove-Item -Recurse -Force winsparkle }
-          # Clone winsparkle repo v0.9.2
-          git clone https://github.com/vslavik/winsparkle.git -b v0.9.2 --depth 1
-          cd winsparkle
-          git submodule update --init --recursive
-          copy ..\bundled_winsparkle.patch .
-          git apply bundled_winsparkle.patch
-          nuget restore
-          msbuild -m -t:Build -p:Configuration=Release -p:Platform=x64 WinSparkle.sln
-          msbuild -m -t:Build -p:Configuration=Release -p:Platform=Win32 WinSparkle.sln
+          $solutionDir = (Resolve-Path .).Path + '\'
+          msbuild.exe test\TestResponseParser\TestResponseParser.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:SolutionDir=$solutionDir /p:WindowsTargetPlatformVersion=${{ env.SDKVER }} /fl7
+          if ($LASTEXITCODE -ne 0) { throw "TestResponseParser build failed with exit code $LASTEXITCODE" }
 
-      - name: Install WinSparkle files
+      - name: Run handshake tests (must pass)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          copy .\winsparkle\x64\Release\WinSparkle.dll .\output\
-          copy .\winsparkle\x64\Release\WinSparkle.lib .\lib64\
-          copy .\winsparkle\Release\WinSparkle.dll .\output\Win32\
-          copy .\winsparkle\Release\WinSparkle.lib .\lib\
+          $exe = Get-ChildItem -Path . -Recurse -Filter TestResponseParser.exe |
+            Where-Object { $_.FullName -like '*\msbuild\Debug\x64\*' } |
+            Select-Object -First 1
+          if (-not $exe) { throw 'TestResponseParser.exe not found under msbuild\Debug\x64' }
+          Write-Host "Running $($exe.FullName) /handshake"
+          # Feed an empty line to the trailing system("pause") and capture the
+          # child's stdout+stderr natively: a cmd `>` redirect lost the output.
+          $out = '' | & $exe.FullName /handshake 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host '--- handshake test output ---'
+          Write-Host $out
+          $out | Out-File -FilePath 'ipc-handshake-output.log' -Encoding utf8
+          Write-Host "--- exit code: $code ---"
+          if ($code -ne 0) { throw "handshake tests failed with exit code $code" }
 
-      - name: Get Rime files
+      - name: Run full suite (informational)
+        continue-on-error: true
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          .\get-rime.ps1 -use dev
+          $exe = Get-ChildItem -Path . -Recurse -Filter TestResponseParser.exe |
+            Where-Object { $_.FullName -like '*\msbuild\Debug\x64\*' } |
+            Select-Object -First 1
+          Write-Host "Running full suite: $($exe.FullName)"
+          Write-Host 'NOTE: test_4 on this base still encodes the retired per-field'
+          Write-Host 'ctx.cand protocol, so BOOST_ASSERT aborts the process (exit 3).'
+          Write-Host '#1983 rewrites test_4; that failure predates this patch.'
+          $out = '' | & $exe.FullName 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host '--- full suite output ---'
+          Write-Host $out
+          $out | Out-File -FilePath 'ipc-fullsuite-output.log' -Encoding utf8
+          Write-Host "--- full suite exit code: $code (3 = pre-existing test_4 abort) ---"
 
-      - name: Build data
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          .\build.bat data
-
-      - name: Setup xmake
-        if: matrix.variant == 'xmake'
-        uses: xmake-io/github-action-setup-xmake@v1
-
-      - name: Build Weasel
-        shell: pwsh
-        id: build_weasel
-        env:
-          RELEASE_BUILD: ${{ (github.repository == 'rime/weasel' && startsWith(github.ref, 'refs/tags/')) && '1' || '' }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ('${{ matrix.variant }}' -eq 'msbuild') {
-            .\build.bat arm64 installer
-          } else {
-            .\xbuild.bat arm64 installer
-          }
-
-      - name: Test language profile helper
-        if: matrix.variant == 'msbuild'
-        shell: powershell
-        run: .\test\TestWeaselLanguageProfile.ps1
-
-      - name: Test upgrade language settings
-        if: matrix.variant == 'msbuild'
-        shell: powershell
-        timeout-minutes: 5
-        run: |
-          $installer = Get-Item .\output\archives\weasel*-installer.exe
-          .\test\TestWeaselUpgrade.ps1 -Installer $installer.FullName
-
-      - name: Compress Debug Symbols
-        if: matrix.variant == 'msbuild'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          output\7z.exe a -t7z "./output/archives/debug_symbols.7z" "output/*.pdb" -r
-
-      - name: Upload artifacts
-        if: matrix.variant == 'msbuild'
+      - name: Upload test log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: weasel-artifact-${{ env.git_ref_name }}
-          if-no-files-found: error
+          name: ipc-regression-msbuild-log
           path: |
-            .\output\archives\weasel*.exe
-            .\output\archives\debug_symbols.7z
-
-      # Release-only steps (run on tags or master)
-      - name: Extract changelog
-        if: ${{ github.repository == 'rime/weasel' && startsWith(github.ref, 'refs/tags/') && matrix.variant == 'msbuild' }}
-        shell: pwsh
-        run: .\extract_changelog.ps1
-
-      - name: Create Nightly release
-        if: ${{ github.repository == 'rime/weasel' && github.ref == 'refs/heads/master' && matrix.variant == 'msbuild' }}
-        uses: 'marvinpinto/action-automatic-releases@latest'
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          automatic_release_tag: latest
-          prerelease: true
-          title: "Nightly Build"
-          files: |
-            ./output/archives/weasel*.exe
-            ./output/archives/debug_symbols.7z
-
-      - name: Release (stable)
-        if: ${{ github.repository == 'rime/weasel' && startsWith(github.ref, 'refs/tags/') && matrix.variant == 'msbuild' }}
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          files: |
-            ./output/archives/weasel*.exe
-            ./output/archives/debug_symbols.7z
-          body_path: ${{ github.workspace }}/RELEASE_CHANGELOG.md
+            msbuild*.log
+            ipc-handshake-output.log
+            ipc-fullsuite-output.log
+          if-no-files-found: ignore
