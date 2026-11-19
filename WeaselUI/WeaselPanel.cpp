@@ -801,15 +801,24 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
         }
         rect.InflateRect(DPI_SCALE(m_style.hilite_padding_x),
                          DPI_SCALE(m_style.hilite_padding_y));
-        // zebra stripes: every Nth candidate keeps a permanent hilite
-        // background. i is 0-based, so spacing 2 lights the 2nd, 4th, ...
-        // rows (labels 2. 4. 6. ...). Skip transparent to keep the
-        // hilited color scheme in charge of whether stripes show.
+        // zebra stripes: the first slot whose repeating pattern selects
+        // this row (pattern[i % len], i 0-based, so "01" lights the 2nd,
+        // 4th, ... rows) lends its back color; 0 (transparent) inherits
+        // the scheme's hilited back color so a slot only overrides what
+        // it specifies. Rows matching no slot keep the normal back color.
         int stripe_back = m_style.candidate_back_color;
-        if (m_style.zebra_hilite && m_style.zebra_hilite_spacing > 0 &&
-            (i % m_style.zebra_hilite_spacing) == 1 &&
-            COLORNOTTRANSPARENT(m_style.hilited_candidate_back_color))
-          stripe_back = m_style.hilited_candidate_back_color;
+        if (m_style.zebra_hilite)
+          for (const auto& slot : m_style.zebra_slots) {
+            const size_t len = slot.pattern.size();
+            if (len && slot.pattern[i % len] == L'1') {
+              if (COLORNOTTRANSPARENT(slot.back_color))
+                stripe_back = slot.back_color;
+              else if (COLORNOTTRANSPARENT(
+                           m_style.hilited_candidate_back_color))
+                stripe_back = m_style.hilited_candidate_back_color;
+              break;
+            }
+          }
         _HighlightText(dc, rect, stripe_back, 0x00000000,
                        DPI_SCALE(m_style.round_corner), bkType, rd,
                        m_style.candidate_border_color);
@@ -892,18 +901,35 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
         candidate_text_color = m_style.hilited_candidate_text_color;
         comment_text_color = m_style.hilited_comment_text_color;
       } else {
-        // zebra stripes: striped rows use hilited text colors so they stay
-        // readable on the hilited background
-        bool stripe_text = m_style.zebra_hilite &&
-                           m_style.zebra_hilite_spacing > 0 &&
-                           (i % m_style.zebra_hilite_spacing) == 1;
-        label_text_color = stripe_text ? m_style.hilited_label_text_color
-                                       : m_style.label_text_color;
-        candidate_text_color = stripe_text
-                                   ? m_style.hilited_candidate_text_color
-                                   : m_style.candidate_text_color;
-        comment_text_color = stripe_text ? m_style.hilited_comment_text_color
-                                         : m_style.comment_text_color;
+        // zebra stripes: a row selected by the first matching slot uses
+        // that slot's text colors (0 = inherit scheme colors, falling back
+        // to the hilited variants for readability on striped backgrounds)
+        const UIStyle::ZebraSlot* stripe_slot = nullptr;
+        if (m_style.zebra_hilite)
+          for (const auto& slot : m_style.zebra_slots) {
+            const size_t len = slot.pattern.size();
+            if (len && slot.pattern[i % len] == L'1') {
+              stripe_slot = &slot;
+              break;
+            }
+          }
+        if (stripe_slot) {
+          label_text_color = COLORNOTTRANSPARENT(stripe_slot->label_color)
+                                 ? stripe_slot->label_color
+                                 : m_style.hilited_label_text_color;
+          candidate_text_color =
+              COLORNOTTRANSPARENT(stripe_slot->text_color)
+                  ? stripe_slot->text_color
+                  : m_style.hilited_candidate_text_color;
+          comment_text_color =
+              COLORNOTTRANSPARENT(stripe_slot->comment_color)
+                  ? stripe_slot->comment_color
+                  : m_style.hilited_comment_text_color;
+        } else {
+          label_text_color = m_style.label_text_color;
+          candidate_text_color = m_style.candidate_text_color;
+          comment_text_color = m_style.comment_text_color;
+        }
       }
       // Draw label
       std::wstring label = m_layout->GetLabelText(

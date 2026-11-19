@@ -1183,14 +1183,48 @@ static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
       {std::string("hilite"), UIStyle::HoverType::HILITE}};
   _RimeParseStringOptWithFallback(config, "style/hover_type", style.hover_type,
                                   _hoverTypeMap, style.hover_type);
-  // zebra stripes: permanently hilite every Nth candidate (default off at
-  // base load; a schema without the key inherits the base value)
+  // zebra stripes: named highlight slots under style/zebra_hilite/highlights
+  // (default off at base load; a schema without the key inherits the base
+  // value). Each slot: pattern (repeating bitmap over 0-based row index),
+  // plus optional back_color/text_color/label_color/comment_color/
+  // border_color falling back to the active scheme's hilited colors.
   _RimeGetBool(config, "style/zebra_hilite", initialize, style.zebra_hilite);
-  _RimeGetIntStr(config, "style/zebra_hilite_spacing",
-                 style.zebra_hilite_spacing, 0, 0, _abs);
-  // spacing 0 means unset; the default period lights every 2nd row
-  if (style.zebra_hilite_spacing <= 0)
-    style.zebra_hilite_spacing = 2;
+  style.zebra_slots.clear();
+  RimeConfigIterator zebra_iter = {0};
+  for (rime_api->config_begin_map(&zebra_iter, config,
+                                  "style/zebra_hilite/highlights");
+       rime_api->config_next(&zebra_iter);) {
+    UIStyle::ZebraSlot slot;
+    std::string slot_prefix(zebra_iter.path);
+    char zbuf[256] = {0};
+    if (rime_api->config_get_string(
+            config, (slot_prefix + "/pattern").c_str(), zbuf, 255)) {
+      std::wstring pat = u8tow(zbuf);
+      bool has_digit = false;
+      for (wchar_t ch : pat)
+        if (ch == L'0' || ch == L'1') { has_digit = true; break; }
+      if (has_digit)
+        slot.pattern = pat;
+    }
+    // a slot with no usable pattern lights nothing; keep it out of the
+    // list and say so, otherwise the silent drop looks like a bug
+    if (slot.pattern.empty()) {
+      LOG(INFO) << "zebra slot '" << zebra_iter.key
+                << "' has no usable pattern (0/1 digits expected); skipped";
+      continue;
+    }
+    const auto zebra_color = [&](const char* key, int& value) {
+      // missing key leaves 0 (transparent) = "inherit the scheme color"
+      _RimeGetColor(config, (slot_prefix + "/" + key), value, COLOR_ABGR, 0);
+    };
+    zebra_color("back_color", slot.back_color);
+    zebra_color("text_color", slot.text_color);
+    zebra_color("label_color", slot.label_color);
+    zebra_color("comment_color", slot.comment_color);
+    zebra_color("border_color", slot.border_color);
+    style.zebra_slots.push_back(slot);
+  }
+  rime_api->config_end(&zebra_iter);
   const std::map<std::string, UIStyle::LayoutAlignType> _alignType = {
       {std::string("top"), UIStyle::ALIGN_TOP},
       {std::string("center"), UIStyle::ALIGN_CENTER},
