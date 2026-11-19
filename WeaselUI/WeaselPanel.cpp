@@ -787,9 +787,12 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
         drawn = true;
       }
     }
-    // draw non highlighted candidates, without shadow
+    // draw non highlighted candidates, without shadow. The zebra stripes
+    // must survive schemes with a fully transparent candidate back color
+    // (common on minimal skins), so let them into the loop as well.
     if ((COLORNOTTRANSPARENT(m_style.candidate_back_color) ||
-         COLORNOTTRANSPARENT(m_style.candidate_border_color))) {
+         COLORNOTTRANSPARENT(m_style.candidate_border_color) ||
+         (m_style.zebra_hilite && !m_style.zebra_slots.empty()))) {
       for (auto i = 0; i < m_candidateCount && i < MAX_CANDIDATES_COUNT; ++i) {
         if (i == m_ctx.cinfo.highlighted || i == m_hoverIndex)
           continue;
@@ -803,10 +806,12 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
                          DPI_SCALE(m_style.hilite_padding_y));
         // zebra stripes: the first slot whose repeating pattern selects
         // this row (pattern[i % len], i 0-based, so "01" lights the 2nd,
-        // 4th, ... rows) lends its back color; 0 (transparent) inherits
-        // the scheme's hilited back color so a slot only overrides what
-        // it specifies. Rows matching no slot keep the normal back color.
+        // 4th, ... rows) lends its back/border colors; 0 (transparent)
+        // inherits the scheme's hilited back color so a slot only
+        // overrides what it specifies. Rows matching no slot keep the
+        // normal back color.
         int stripe_back = m_style.candidate_back_color;
+        int stripe_border = m_style.candidate_border_color;
         if (m_style.zebra_hilite)
           for (const auto& slot : m_style.zebra_slots) {
             const size_t len = slot.pattern.size();
@@ -816,12 +821,14 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
               else if (COLORNOTTRANSPARENT(
                            m_style.hilited_candidate_back_color))
                 stripe_back = m_style.hilited_candidate_back_color;
+              if (COLORNOTTRANSPARENT(slot.border_color))
+                stripe_border = slot.border_color;
               break;
             }
           }
         _HighlightText(dc, rect, stripe_back, 0x00000000,
                        DPI_SCALE(m_style.round_corner), bkType, rd,
-                       m_style.candidate_border_color);
+                       stripe_border);
         drawn = true;
       }
     }
