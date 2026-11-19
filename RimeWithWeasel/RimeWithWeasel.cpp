@@ -1183,6 +1183,14 @@ static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
       {std::string("hilite"), UIStyle::HoverType::HILITE}};
   _RimeParseStringOptWithFallback(config, "style/hover_type", style.hover_type,
                                   _hoverTypeMap, style.hover_type);
+  // zebra stripes: permanently hilite every Nth candidate (default off at
+  // base load; a schema without the key inherits the base value)
+  _RimeGetBool(config, "style/zebra_hilite", initialize, style.zebra_hilite);
+  _RimeGetIntStr(config, "style/zebra_hilite_spacing",
+                 style.zebra_hilite_spacing, 0, 0, _abs);
+  // spacing 0 means unset; the default period lights every 2nd row
+  if (style.zebra_hilite_spacing <= 0)
+    style.zebra_hilite_spacing = 2;
   const std::map<std::string, UIStyle::LayoutAlignType> _alignType = {
       {std::string("top"), UIStyle::ALIGN_TOP},
       {std::string("center"), UIStyle::ALIGN_CENTER},

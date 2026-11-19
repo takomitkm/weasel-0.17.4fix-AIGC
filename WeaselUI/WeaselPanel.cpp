@@ -801,7 +801,16 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
         }
         rect.InflateRect(DPI_SCALE(m_style.hilite_padding_x),
                          DPI_SCALE(m_style.hilite_padding_y));
-        _HighlightText(dc, rect, m_style.candidate_back_color, 0x00000000,
+        // zebra stripes: every Nth candidate keeps a permanent hilite
+        // background. i is 0-based, so spacing 2 lights the 2nd, 4th, ...
+        // rows (labels 2. 4. 6. ...). Skip transparent to keep the
+        // hilited color scheme in charge of whether stripes show.
+        int stripe_back = m_style.candidate_back_color;
+        if (m_style.zebra_hilite && m_style.zebra_hilite_spacing > 0 &&
+            (i % m_style.zebra_hilite_spacing) == 1 &&
+            COLORNOTTRANSPARENT(m_style.hilited_candidate_back_color))
+          stripe_back = m_style.hilited_candidate_back_color;
+        _HighlightText(dc, rect, stripe_back, 0x00000000,
                        DPI_SCALE(m_style.round_corner), bkType, rd,
                        m_style.candidate_border_color);
         drawn = true;
@@ -883,9 +892,18 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
         candidate_text_color = m_style.hilited_candidate_text_color;
         comment_text_color = m_style.hilited_comment_text_color;
       } else {
-        label_text_color = m_style.label_text_color;
-        candidate_text_color = m_style.candidate_text_color;
-        comment_text_color = m_style.comment_text_color;
+        // zebra stripes: striped rows use hilited text colors so they stay
+        // readable on the hilited background
+        bool stripe_text = m_style.zebra_hilite &&
+                           m_style.zebra_hilite_spacing > 0 &&
+                           (i % m_style.zebra_hilite_spacing) == 1;
+        label_text_color = stripe_text ? m_style.hilited_label_text_color
+                                       : m_style.label_text_color;
+        candidate_text_color = stripe_text
+                                   ? m_style.hilited_candidate_text_color
+                                   : m_style.candidate_text_color;
+        comment_text_color = stripe_text ? m_style.hilited_comment_text_color
+                                         : m_style.comment_text_color;
       }
       // Draw label
       std::wstring label = m_layout->GetLabelText(

@@ -230,6 +230,9 @@ struct UIStyle {
   bool enhanced_position;
   bool click_to_capture;
   HoverType hover_type;
+  // zebra stripes: keep every Nth candidate permanently hilited
+  bool zebra_hilite;
+  int zebra_hilite_spacing;
   AntiAliasMode antialias_mode;
   PreeditType preedit_type;
   // custom icon settings
@@ -307,6 +310,8 @@ struct UIStyle {
         enhanced_position(false),
         click_to_capture(false),
         hover_type(NONE),
+        zebra_hilite(false),
+        zebra_hilite_spacing(0),
         antialias_mode(DEFAULT),
         preedit_type(COMPOSITION),
         current_zhung_icon(),
@@ -384,6 +389,8 @@ struct UIStyle {
         current_full_icon != st.current_full_icon ||
         enhanced_position != st.enhanced_position ||
         click_to_capture != st.click_to_capture ||
+        zebra_hilite != st.zebra_hilite ||
+        zebra_hilite_spacing != st.zebra_hilite_spacing ||
         label_text_format != st.label_text_format ||
         min_width != st.min_width || max_width != st.max_width ||
         min_height != st.min_height || max_height != st.max_height ||
@@ -500,6 +507,12 @@ void serialize(Archive& ar, weasel::UIStyle& s, const unsigned int version) {
   ar & s.client_caps;
   ar & s.baseline;
   ar & s.linespacing;
+  // zebra stripes: appended last so the legacy stream prefix stays
+  // byte-compatible with older builds (an old peer reads the prefix and
+  // ignores the trailing bytes; a new peer against an old server only
+  // exists in a half-install window and fails deserialization there)
+  ar & s.zebra_hilite;
+  ar & s.zebra_hilite_spacing;
 }
 
 template <typename Archive>
