@@ -248,12 +248,13 @@ struct UIStyle {
           label_color(0),
           comment_color(0),
           border_color(0) {}
-    bool operator!=(const ZebraSlot& s) const {
-      return pattern != s.pattern || back_color != s.back_color ||
-             text_color != s.text_color || label_color != s.label_color ||
-             comment_color != s.comment_color ||
-             border_color != s.border_color;
+    bool operator==(const ZebraSlot& s) const {
+      return pattern == s.pattern && back_color == s.back_color &&
+             text_color == s.text_color && label_color == s.label_color &&
+             comment_color == s.comment_color &&
+             border_color == s.border_color;
     }
+    bool operator!=(const ZebraSlot& s) const { return !(*this == s); }
   };
   std::vector<ZebraSlot> zebra_slots;
   AntiAliasMode antialias_mode;
