@@ -823,6 +823,9 @@ bool WeaselPanel::_DrawCandidates(CDCHandle& dc, bool back) {
                 stripe_back = m_style.hilited_candidate_back_color;
               if (COLORNOTTRANSPARENT(slot.border_color))
                 stripe_border = slot.border_color;
+              else if (COLORNOTTRANSPARENT(
+                           m_style.hilited_candidate_border_color))
+                stripe_border = m_style.hilited_candidate_border_color;
               break;
             }
           }
